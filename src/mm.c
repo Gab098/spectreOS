@@ -1,54 +1,56 @@
 #include "mm.h"
 #include "multiboot2.h"
+#include "heap.h"
 #include <stddef.h>
+#include <string.h>
 
-// Dichiarazione esterna del simbolo 'end' dal linker script
+// External symbol from linker script
 extern uint32_t end;
 
-// Bitmap per il PMM
+// PMM bitmap
 static uint32_t *pmm_bitmap = NULL;
 static uint32_t pmm_total_frames = 0;
 static uint32_t pmm_bitmap_size = 0;
 
-// Funzione per impostare un bit nella bitmap
+// Set a bit in the bitmap (mark as used)
 static void pmm_set_bit(uint32_t frame) {
     uint32_t idx = frame / 32;
     uint32_t off = frame % 32;
     pmm_bitmap[idx] |= (1 << off);
 }
 
-// Funzione per liberare un bit nella bitmap
+// Clear a bit in the bitmap (mark as free)
 static void pmm_clear_bit(uint32_t frame) {
     uint32_t idx = frame / 32;
     uint32_t off = frame % 32;
     pmm_bitmap[idx] &= ~(1 << off);
 }
 
-// Funzione per testare un bit nella bitmap
+// Test a bit in the bitmap
 static uint32_t pmm_test_bit(uint32_t frame) {
     uint32_t idx = frame / 32;
     uint32_t off = frame % 32;
     return (pmm_bitmap[idx] & (1 << off));
 }
 
-// Inizializza il PMM
+// Initialize PMM
 void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     uint32_t max_mem = 0;
     struct multiboot_tag_mmap *mmap_tag = NULL;
 
-    // Trova il tag della mappa di memoria
+    // Find memory map tag
     for (struct multiboot_tag *tag = (struct multiboot_tag *)mmap_addr;
          (uint8_t *)tag < (uint8_t *)mmap_addr + mmap_length;
          tag = (struct multiboot_tag *)((uint8_t *)tag + ((tag->size + 7) & ~7))) {
-        if (tag->type == 6) { // Tipo 6 è il tag mmap
+        if (tag->type == 6) {
             mmap_tag = (struct multiboot_tag_mmap *)tag;
             break;
         }
     }
 
-    if (!mmap_tag) return; // Mappa di memoria non trovata
+    if (!mmap_tag) return;
 
-    // Calcola la memoria totale per determinare la dimensione della bitmap
+    // Calculate total memory
     for (struct multiboot_mmap_entry *entry = mmap_tag->entries;
          (uint8_t *)entry < (uint8_t *)mmap_tag + mmap_tag->size;
          entry = (struct multiboot_mmap_entry *)((uint8_t *)entry + mmap_tag->entry_size)) {
@@ -61,17 +63,17 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     }
 
     pmm_total_frames = max_mem / PAGE_SIZE;
-    pmm_bitmap_size = pmm_total_frames / 8; // 1 bit per frame
+    pmm_bitmap_size = pmm_total_frames / 8;
 
-    // Posiziona la bitmap dopo la fine del kernel
+    // Place bitmap after kernel
     pmm_bitmap = (uint32_t *)&end;
 
-    // Inizialmente, segna tutta la memoria come non disponibile (tutti i bit a 1)
+    // Initially mark all memory as used
     for (uint32_t i = 0; i < pmm_bitmap_size / 4; i++) {
         pmm_bitmap[i] = 0xFFFFFFFF;
     }
 
-    // Libera i frame disponibili secondo la mappa di memoria (imposta i bit a 0)
+    // Free available memory regions
     for (struct multiboot_mmap_entry *entry = mmap_tag->entries;
          (uint8_t *)entry < (uint8_t *)mmap_tag + mmap_tag->size;
          entry = (struct multiboot_mmap_entry *)((uint8_t *)entry + mmap_tag->entry_size)) {
@@ -82,8 +84,7 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
         }
     }
 
-    // Ora, marca esplicitamente come occupate le pagine usate dal kernel.
-    // Assumiamo che il kernel sia caricato a 1MB (0x100000).
+    // Mark kernel and bitmap as used
     uint32_t kernel_start_frame = 0x100000 / PAGE_SIZE;
     uint32_t bitmap_end_addr = (uint32_t)&end + pmm_bitmap_size;
     uint32_t kernel_end_frame = bitmap_end_addr / PAGE_SIZE;
@@ -95,12 +96,11 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
         pmm_set_bit(frame);
     }
 
-    // Per sicurezza, marca sempre come occupata la prima pagina (frame 0)
-    // che contiene strutture critiche del BIOS/real mode.
+    // Always mark first page as used
     pmm_set_bit(0);
 }
 
-// Alloca un frame di memoria fisica
+// Allocate a physical frame
 uint32_t pmm_alloc_frame() {
     for (uint32_t frame = 0; frame < pmm_total_frames; frame++) {
         if (!pmm_test_bit(frame)) {
@@ -108,10 +108,10 @@ uint32_t pmm_alloc_frame() {
             return frame * PAGE_SIZE;
         }
     }
-    return 0; // Nessun frame libero
+    return 0; // Out of memory
 }
 
-// Libera un frame di memoria fisica
+// Free a physical frame
 void pmm_free_frame(uint32_t frame_addr) {
     uint32_t frame = frame_addr / PAGE_SIZE;
     if (pmm_test_bit(frame)) {
@@ -119,16 +119,17 @@ void pmm_free_frame(uint32_t frame_addr) {
     }
 }
 
-// VMM implementation
+// VMM globals
 page_directory_t *kernel_directory = 0;
 page_directory_t *current_directory = 0;
 
+// Initialize VMM
 void vmm_init() {
-    // Alloca la page directory PRIMA di abilitare paging
+    // Allocate page directory
     uint32_t kernel_directory_phys = pmm_alloc_frame();
     kernel_directory = (page_directory_t*)kernel_directory_phys;
     
-    // Azzera la page directory
+    // Zero the page directory
     for(int i = 0; i < 1024; i++) {
         kernel_directory->tables[i].present = 0;
         kernel_directory->tables[i].rw = 1;
@@ -136,7 +137,7 @@ void vmm_init() {
         kernel_directory->tables[i].frame = 0;
     }
     
-    // Identity map i primi 8MB invece di 4MB (per includere kernel + heap)
+    // Identity map first 8MB (kernel + heap)
     for(int pd_idx = 0; pd_idx < 2; pd_idx++) {
         uint32_t table_phys = pmm_alloc_frame();
         page_table_t *table = (page_table_t*)table_phys;
@@ -157,6 +158,7 @@ void vmm_init() {
     vmm_switch_page_directory((page_directory_t*)kernel_directory_phys);
 }
 
+// Switch page directory
 void vmm_switch_page_directory(page_directory_t *dir) {
     current_directory = dir;
     __asm__ volatile("mov %0, %%cr3":: "r"(dir));
@@ -166,9 +168,11 @@ void vmm_switch_page_directory(page_directory_t *dir) {
     __asm__ volatile("mov %0, %%cr0":: "r"(cr0));
 }
 
+// Get page table entry
 page_table_entry_t* vmm_get_page(uint32_t address, int make, page_directory_t *dir) {
     address /= PAGE_SIZE;
     uint32_t table_idx = address / 1024;
+    
     if (dir->tables[table_idx].present) {
         page_table_t *table = (page_table_t*)(dir->tables[table_idx].frame * PAGE_SIZE);
         return &table->pages[address % 1024];
@@ -178,18 +182,92 @@ page_table_entry_t* vmm_get_page(uint32_t address, int make, page_directory_t *d
         dir->tables[table_idx].rw = 1;
         dir->tables[table_idx].user = 0;
         dir->tables[table_idx].frame = tmp >> 12;
+        
         page_table_t *table = (page_table_t*)tmp;
-        for(int i=0; i<1024; i++) table->pages[i].present = 0;
+        for(int i=0; i<1024; i++) {
+            table->pages[i].present = 0;
+        }
         return &table->pages[address % 1024];
-    } else {
-        return 0;
+    }
+    return 0;
+}
+
+// Map virtual address to physical address
+void vmm_map_page(uint32_t virt, uint32_t phys) {
+    page_table_entry_t *page = vmm_get_page(virt, 1, kernel_directory);
+    if (page) {
+        page->present = 1;
+        page->rw = 1;
+        page->user = 0;
+        page->frame = phys >> 12;
     }
 }
 
-void vmm_map_page(uint32_t virt, uint32_t phys) {
-    page_table_entry_t *page = vmm_get_page(virt, 1, kernel_directory);
-    page->present = 1;
-    page->rw = 1;
-    page->user = 0;
-    page->frame = phys >> 12;
+// Clone a page table
+static page_table_t* clone_page_table(page_table_t *src, uint32_t *phys_addr) {
+    // Allocate new page table
+    uint32_t table_phys = pmm_alloc_frame();
+    page_table_t *table = (page_table_t*)table_phys;
+    
+    if (phys_addr) {
+        *phys_addr = table_phys;
+    }
+    
+    // Copy all entries
+    for (int i = 0; i < 1024; i++) {
+        if (!src->pages[i].present) {
+            table->pages[i].present = 0;
+            continue;
+        }
+        
+        // Allocate new frame for copy-on-write
+        uint32_t new_frame = pmm_alloc_frame();
+        
+        // Copy page data
+        memcpy((void*)new_frame, 
+               (void*)(src->pages[i].frame * PAGE_SIZE), 
+               PAGE_SIZE);
+        
+        // Set up new page entry
+        table->pages[i].present = src->pages[i].present;
+        table->pages[i].rw = src->pages[i].rw;
+        table->pages[i].user = src->pages[i].user;
+        table->pages[i].accessed = 0;
+        table->pages[i].dirty = 0;
+        table->pages[i].frame = new_frame >> 12;
+    }
+    
+    return table;
+}
+
+// Clone a page directory
+page_directory_t* clone_page_directory(page_directory_t *src) {
+    // Allocate new page directory
+    uint32_t dir_phys = pmm_alloc_frame();
+    page_directory_t *dir = (page_directory_t*)dir_phys;
+    
+    // Zero it out
+    memset(dir, 0, sizeof(page_directory_t));
+    
+    // Copy each page table
+    for (int i = 0; i < 1024; i++) {
+        if (!src->tables[i].present) {
+            continue;
+        }
+        
+        // Get source table
+        page_table_t *src_table = (page_table_t*)(src->tables[i].frame * PAGE_SIZE);
+        
+        // Clone it
+        uint32_t new_table_phys;
+        clone_page_table(src_table, &new_table_phys);
+        
+        // Set up directory entry
+        dir->tables[i].present = 1;
+        dir->tables[i].rw = src->tables[i].rw;
+        dir->tables[i].user = src->tables[i].user;
+        dir->tables[i].frame = new_table_phys >> 12;
+    }
+    
+    return dir;
 }

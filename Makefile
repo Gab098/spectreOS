@@ -4,26 +4,43 @@ CC = gcc
 LD = ld
 
 # Define compiler and linker flags
-# -felf32: output format
-# -g: add debug info
 ASFLAGS = -felf32 -g
 
 # -ffreestanding: we are not linking against a standard library
 # -nostdlib: don't link standard library
 # -g: add debug info
 # -m32: compile for 32-bit
-CFLAGS = -ffreestanding -nostdlib -g -m32
+# -fno-pie: disable position independent executable
+# -fno-stack-protector: disable stack protection (not available in freestanding)
+CFLAGS = -ffreestanding -nostdlib -g -m32 -fno-pie -fno-stack-protector -Wall -Wextra
 
 # -T: use our linker script
 # -m elf_i386: output format
 LDFLAGS = -T src/linker.ld -m elf_i386
 
 # Define source files
-AS_SOURCES = src/multiboot_header.asm src/bootstrap.asm src/gdt_asm.asm src/idt_handlers.asm src/idt_flush.asm
-C_SOURCES = src/kernel.c src/gdt.c src/idt.c src/pic.c src/keyboard.c src/mm.c src/task.c src/heap.c src/process.c src/serial.c src/vfs.c
+AS_SOURCES = src/multiboot_header.asm \
+             src/bootstrap.asm \
+             src/gdt_asm.asm \
+             src/idt_handlers.asm \
+             src/idt_flush.asm \
+             src/context_switch.asm
+
+C_SOURCES = src/kernel.c \
+            src/gdt.c \
+            src/idt.c \
+            src/pic.c \
+            src/keyboard.c \
+            src/mm.c \
+            src/task.c \
+            src/heap.c \
+            src/process.c \
+            src/serial.c \
+            src/vfs.c \
+            src/string.c
 
 # Define object files
-AS_OBJECTS = build/multiboot_header.o build/bootstrap.o build/gdt_asm.o build/idt_handlers.o build/idt_flush.o build/context_switch.o
+AS_OBJECTS = $(patsubst src/%.asm, build/%.o, $(AS_SOURCES))
 C_OBJECTS = $(patsubst src/%.c, build/%.o, $(C_SOURCES))
 OBJECTS = $(AS_OBJECTS) $(C_OBJECTS)
 
@@ -37,33 +54,13 @@ all: $(KERNEL)
 $(KERNEL): $(OBJECTS)
 	$(LD) $(LDFLAGS) -o $(KERNEL) $(OBJECTS)
 
-# Rule to compile assembly files (explicitly for each)
-build/multiboot_header.o: src/multiboot_header.asm
-	mkdir -p build
-	$(AS) $(ASFLAGS) $< -o $@
-
-build/bootstrap.o: src/bootstrap.asm
-	mkdir -p build
-	$(AS) $(ASFLAGS) $< -o $@
-
-build/gdt_asm.o: src/gdt_asm.asm
-	mkdir -p build
-	$(AS) $(ASFLAGS) $< -o $@
-
-build/idt_handlers.o: src/idt_handlers.asm
-	mkdir -p build
-	$(AS) $(ASFLAGS) $< -o $@
-
-build/idt_flush.o: src/idt_flush.asm
-	mkdir -p build
-	$(AS) $(ASFLAGS) $< -o $@
-
-build/context_switch.o: src/context_switch.asm
+# Rule to compile assembly files
+build/%.o: src/%.asm
 	mkdir -p build
 	$(AS) $(ASFLAGS) $< -o $@
 
 # Rule to compile C files
-$(C_OBJECTS): build/%.o: src/%.c
+build/%.o: src/%.c
 	mkdir -p build
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -82,6 +79,10 @@ iso: $(KERNEL)
 
 # Rule to run the kernel in QEMU
 run: iso
-	qemu-system-i386 -cdrom $(ISO)
+	qemu-system-i386 -cdrom $(ISO) -serial stdio
 
-.PHONY: all clean run iso
+# Rule to run with debugging
+debug: iso
+	qemu-system-i386 -cdrom $(ISO) -serial stdio -s -S
+
+.PHONY: all clean run iso debug

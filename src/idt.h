@@ -21,11 +21,12 @@ struct idt_ptr_struct {
 typedef struct idt_ptr_struct idt_ptr_t;
 
 // This struct defines the registers pushed by the isr_common_stub.
+// MUST match the layout in task.h registers_t
 struct regs {
-    uint32_t ds;
-    uint32_t edi, esi, ebp, esp, ebx, edx, ecx, eax;
-    uint32_t int_no, err_code;
-    uint32_t eip, cs, eflags, useresp, ss;
+    uint32_t ds;                                        // Data segment
+    uint32_t edi, esi, ebp, esp, ebx, edx, ecx, eax;  // Pushed by pusha
+    uint32_t int_no, err_code;                         // Interrupt number and error code
+    uint32_t eip, cs, eflags, useresp, ss;            // Pushed by CPU
 };
 
 // Array of IDT entries.
@@ -76,8 +77,8 @@ extern void isr29();
 extern void isr30();
 extern void isr31();
 
-// IRQ handlers
-extern void irq0_handler();
-extern void irq1_handler();
+// IRQ handlers (32+)
+extern void isr32(); // Timer (IRQ0)
+extern void isr33(); // Keyboard (IRQ1)
 
 #endif

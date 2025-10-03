@@ -1,86 +1,117 @@
 #include "task.h"
-#include "mm.h" // Per pmm_alloc_frame
+#include "mm.h"
+#include "heap.h"
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h> // Per memcpy
+#include <string.h>
 
-// Puntatore al task attualmente in esecuzione
-volatile task_t *current_task;
+// Current running task
+volatile task_t *current_task = NULL;
 
-// Coda dei task pronti (lista concatenata)
-volatile task_t *ready_queue;
+// Ready queue (circular linked list)
+volatile task_t *ready_queue = NULL;
 
-// Prossimo ID da assegnare
-uint32_t next_pid = 1;
+// Next PID to assign
+uint32_t next_pid = 0;
 
-// Funzione per lo scheduling e il context switch
-void schedule_and_switch(registers_t* regs) {
-    if (current_task) {
-        // Salva lo stato del task corrente
-        memcpy(&current_task->regs, regs, sizeof(registers_t));
-    }
-
-    // Seleziona il prossimo task (round-robin)
-    task_t *next_task = current_task->next;
-    if (!next_task) {
-        next_task = (task_t*)ready_queue;
-    }
-
-    current_task = next_task;
-
-    // Carica lo stato del nuovo task nei registri passati
-    memcpy(regs, &current_task->regs, sizeof(registers_t));
-}
-
+// Initialize the tasking system
 void init_tasking() {
-    // Disabilita temporaneamente gli interrupt
     __asm__ volatile("cli");
 
-    // Crea il task iniziale per il kernel
-    current_task = (task_t*)pmm_alloc_frame();
-    current_task->id = next_pid++;
-    // Il task del kernel non ha uno stack separato inizialmente,
-    // userà lo stack del kernel. I suoi registri saranno salvati
-    // dal primo interrupt del timer.
-    memset(&current_task->regs, 0, sizeof(registers_t)); // Inizializza a zero
-    current_task->next = NULL;
-    ready_queue = current_task;
+    // Create initial kernel task
+    task_t *kernel_task = (task_t*)kmalloc(sizeof(task_t));
+    if (!kernel_task) {
+        return; // Failed to allocate
+    }
+    
+    memset(kernel_task, 0, sizeof(task_t));
+    kernel_task->id = next_pid++;
+    kernel_task->next = kernel_task; // Point to itself (circular)
+    
+    current_task = kernel_task;
+    ready_queue = kernel_task;
 
-    // Riabilita gli interrupt
     __asm__ volatile("sti");
 }
 
-// Funzione per creare un nuovo task
-void create_task(void (*entry_point)()) {
-    task_t *new_task = (task_t*)pmm_alloc_frame();
+// Create a new task
+task_t* create_task(void (*entry_point)()) {
+    // Allocate task structure
+    task_t *new_task = (task_t*)kmalloc(sizeof(task_t));
+    if (!new_task) {
+        return NULL;
+    }
+    
     memset(new_task, 0, sizeof(task_t));
     new_task->id = next_pid++;
     
-    // Alloca 2 pagine per lo stack
+    // Allocate stack (1 page = 4KB)
     uint32_t stack_bottom = pmm_alloc_frame();
+    if (!stack_bottom) {
+        kfree(new_task);
+        return NULL;
+    }
+    
     uint32_t stack_top = stack_bottom + PAGE_SIZE;
     
-    // Inizializza i registri per il nuovo task
+    // Initialize registers for the new task
     new_task->regs.eip = (uint32_t)entry_point;
-    new_task->regs.cs = 0x08;
-    new_task->regs.eflags = 0x202; // IF=1
-    new_task->regs.esp = stack_top - 4;
-    new_task->regs.ss = 0x10;
+    new_task->regs.cs = 0x08;  // Kernel code segment
+    new_task->regs.eflags = 0x202; // IF=1 (interrupts enabled)
+    new_task->regs.esp = stack_top - 16; // Leave some room on stack
+    new_task->regs.ss = 0x10;  // Kernel data segment
     new_task->regs.ds = 0x10;
     new_task->regs.es = 0x10;
     new_task->regs.fs = 0x10;
     new_task->regs.gs = 0x10;
     
-    // Aggiungi alla ready queue
+    // Add to ready queue
     __asm__ volatile("cli");
+    
     if (!ready_queue) {
         ready_queue = new_task;
-        new_task->next = new_task; // Circolare
+        new_task->next = new_task;
     } else {
+        // Find last task in circular list
         task_t *tmp = (task_t*)ready_queue;
-        while(tmp->next != ready_queue) tmp = tmp->next;
+        while(tmp->next != ready_queue) {
+            tmp = tmp->next;
+        }
         tmp->next = new_task;
         new_task->next = (task_t*)ready_queue;
     }
+    
     __asm__ volatile("sti");
+    
+    return new_task;
+}
+
+// Schedule next task and perform context switch
+void schedule_and_switch(registers_t* regs) {
+    if (!current_task || !ready_queue) {
+        return;
+    }
+    
+    // Save current task state
+    memcpy((void*)&current_task->regs, regs, sizeof(registers_t));
+    
+    // Select next task (round-robin)
+    task_t *next_task = current_task->next;
+    if (!next_task || next_task == current_task) {
+        // Only one task, no switch needed
+        return;
+    }
+    
+    current_task = next_task;
+    
+    // Load next task state
+    memcpy(regs, (void*)&current_task->regs, sizeof(registers_t));
+}
+
+// Get current task ID
+uint32_t get_current_pid() {
+    if (current_task) {
+        return current_task->id;
+    }
+    return 0;
 }

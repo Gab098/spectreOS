@@ -7,7 +7,6 @@
 #define PAGE_SIZE 4096
 
 // Physical Memory Manager (PMM)
-
 void pmm_init(uint32_t mmap_addr, uint32_t mmap_length);
 uint32_t pmm_alloc_frame();
 void pmm_free_frame(uint32_t frame);
@@ -42,8 +41,15 @@ typedef struct {
     page_directory_entry_t tables[1024];
 } page_directory_t;
 
+// Global page directories
+extern page_directory_t *kernel_directory;
+extern page_directory_t *current_directory;
+
+// VMM functions
 void vmm_init();
 void vmm_map_page(uint32_t virt, uint32_t phys);
 void vmm_switch_page_directory(page_directory_t *dir);
+page_table_entry_t* vmm_get_page(uint32_t address, int make, page_directory_t *dir);
+page_directory_t* clone_page_directory(page_directory_t *src);
 
 #endif // MM_H
