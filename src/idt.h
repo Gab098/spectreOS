@@ -20,13 +20,13 @@ struct idt_ptr_struct {
 } __attribute__((packed));
 typedef struct idt_ptr_struct idt_ptr_t;
 
-// This struct defines the registers pushed by the isr_common_stub.
-// MUST match the layout in task.h registers_t
+// This struct defines the registers pushed by the interrupt handler.
+// IMPORTANT: Order must match the assembly code in idt_handlers.asm!
 struct regs {
-    uint32_t ds;                                        // Data segment
-    uint32_t edi, esi, ebp, esp, ebx, edx, ecx, eax;  // Pushed by pusha
-    uint32_t int_no, err_code;                         // Interrupt number and error code
-    uint32_t eip, cs, eflags, useresp, ss;            // Pushed by CPU
+    uint32_t gs, fs, es, ds;                        // Segment registers (pushed by us)
+    uint32_t edi, esi, ebp, esp, ebx, edx, ecx, eax; // Pushed by pusha
+    uint32_t int_no, err_code;                      // Interrupt number and error code
+    uint32_t eip, cs, eflags, useresp, ss;          // Pushed by CPU automatically
 };
 
 // Array of IDT entries.
@@ -43,7 +43,7 @@ extern void idt_flush(uint32_t);
 // External assembly common stub for all ISRs.
 extern void isr_common_stub();
 
-// ISRs (Interrupt Service Routines) for the first 32 interrupts (exceptions).
+// ISR function declarations (0-31: exceptions)
 extern void isr0();
 extern void isr1();
 extern void isr2();
@@ -77,8 +77,8 @@ extern void isr29();
 extern void isr30();
 extern void isr31();
 
-// IRQ handlers (32+)
-extern void isr32(); // Timer (IRQ0)
-extern void isr33(); // Keyboard (IRQ1)
+// IRQ handler declarations (32-47: hardware interrupts)
+extern void isr32();  // Timer
+extern void isr33();  // Keyboard
 
 #endif

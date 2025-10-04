@@ -1,24 +1,20 @@
-; Context switch implementation for SpectreOS
-; This file handles saving and restoring CPU state during task switches
+; Context switch implementation
+; This function performs the actual task switch
 
-global perform_task_switch
+global switch_to_task
 extern current_task
 
-; perform_task_switch(registers_t* old_regs, registers_t* new_regs)
-; Saves current CPU state to old_regs and loads state from new_regs
-perform_task_switch:
+; void switch_to_task(registers_t* old_regs, registers_t* new_regs)
+switch_to_task:
     push ebp
     mov ebp, esp
     
-    ; Get pointers to register structures
-    mov eax, [ebp + 8]  ; old_regs (current task)
-    mov ebx, [ebp + 12] ; new_regs (next task)
-    
-    ; Save current state to old_regs if not NULL
+    ; Save current task state (if old_regs is not NULL)
+    mov eax, [ebp + 8]  ; old_regs pointer
     test eax, eax
-    jz .load_new
+    jz .load_new_state
     
-    ; Save general purpose registers
+    ; Save current registers to old_regs
     mov [eax + 0], edi
     mov [eax + 4], esi
     mov [eax + 8], ebp
@@ -26,76 +22,29 @@ perform_task_switch:
     mov [eax + 16], ebx
     mov [eax + 20], edx
     mov [eax + 24], ecx
-    ; eax is already used, we'll save it last
+    mov [eax + 28], ecx  ; eax will be saved later
     
-    ; Save segment registers
-    mov cx, ds
-    mov [eax + 32], cx  ; ds
+.load_new_state:
+    ; Load new task state
+    mov eax, [ebp + 12]  ; new_regs pointer
     
-    ; Save return address as EIP
-    mov ecx, [ebp + 4]
-    mov [eax + 36], ecx ; eip
+    ; Restore registers from new_regs
+    mov edi, [eax + 0]
+    mov esi, [eax + 4]
+    mov ebp, [eax + 8]
+    mov esp, [eax + 12]
+    mov ebx, [eax + 16]
+    mov edx, [eax + 20]
+    mov ecx, [eax + 24]
+    ; eax is restored last
     
-    ; Save CS
-    mov cx, cs
-    mov [eax + 40], cx
+    ; Restore segment registers
+    mov ax, [eax + 32 + 2]  ; ds
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
     
-    ; Save EFLAGS
-    pushfd
-    pop ecx
-    mov [eax + 44], ecx
-    
-    ; Save ESP and SS
-    mov ecx, esp
-    mov [eax + 48], ecx
-    mov cx, ss
-    mov [eax + 52], cx
-    
-    ; Now save eax
-    push eax
-    mov eax, [ebp - 4]  ; Original eax from stack
-    mov ecx, [esp]
-    mov [ecx + 28], eax
-    pop eax
-
-.load_new:
-    ; Load new state from new_regs
-    test ebx, ebx
-    jz .done
-    
-    ; Load general purpose registers
-    mov edi, [ebx + 0]
-    mov esi, [ebx + 4]
-    mov ebp, [ebx + 8]
-    ; Don't load ESP yet
-    ; Don't load EBX yet (we're using it)
-    mov edx, [ebx + 20]
-    mov ecx, [ebx + 24]
-    mov eax, [ebx + 28]
-    
-    ; Load segment registers
-    mov dx, [ebx + 32]
-    mov ds, dx
-    mov es, dx
-    mov fs, dx
-    mov gs, dx
-    
-    ; Prepare stack for iret
-    mov esp, [ebx + 48]  ; Load new ESP
-    
-    ; Push values for iret: SS, ESP, EFLAGS, CS, EIP
-    push dword [ebx + 52] ; SS
-    push dword [ebx + 48] ; ESP
-    push dword [ebx + 44] ; EFLAGS
-    push dword [ebx + 40] ; CS
-    push dword [ebx + 36] ; EIP
-    
-    ; Load remaining registers
-    mov ebx, [ebx + 16]
-    
-    ; Return to new task
-    iretd
-
-.done:
+    ; The actual context switch will happen via iret in the interrupt handler
     pop ebp
     ret

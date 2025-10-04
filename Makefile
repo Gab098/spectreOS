@@ -6,41 +6,23 @@ LD = ld
 # Define compiler and linker flags
 ASFLAGS = -felf32 -g
 
-# -ffreestanding: we are not linking against a standard library
-# -nostdlib: don't link standard library
-# -g: add debug info
-# -m32: compile for 32-bit
-# -fno-pie: disable position independent executable
-# -fno-stack-protector: disable stack protection (not available in freestanding)
-CFLAGS = -ffreestanding -nostdlib -g -m32 -fno-pie -fno-stack-protector -Wall -Wextra
+# Add -O2 for optimization, -Wall for warnings
+CFLAGS = -ffreestanding -nostdlib -g -m32 -O2 -Wall -Wextra -fno-builtin -fno-stack-protector
 
-# -T: use our linker script
-# -m elf_i386: output format
 LDFLAGS = -T src/linker.ld -m elf_i386
 
 # Define source files
-AS_SOURCES = src/multiboot_header.asm \
-             src/bootstrap.asm \
-             src/gdt_asm.asm \
-             src/idt_handlers.asm \
-             src/idt_flush.asm \
-             src/context_switch.asm
+AS_SOURCES = src/multiboot_header.asm src/bootstrap.asm src/gdt_asm.asm \
+             src/idt_handlers.asm src/idt_flush.asm src/context_switch.asm
 
-C_SOURCES = src/kernel.c \
-            src/gdt.c \
-            src/idt.c \
-            src/pic.c \
-            src/keyboard.c \
-            src/mm.c \
-            src/task.c \
-            src/heap.c \
-            src/process.c \
-            src/serial.c \
-            src/vfs.c \
-            src/string.c
+C_SOURCES = src/kernel.c src/gdt.c src/idt.c src/pic.c src/keyboard.c \
+            src/mm.c src/task.c src/heap.c src/process.c src/serial.c \
+            src/vfs.c src/string.c
 
 # Define object files
-AS_OBJECTS = $(patsubst src/%.asm, build/%.o, $(AS_SOURCES))
+AS_OBJECTS = build/multiboot_header.o build/bootstrap.o build/gdt_asm.o \
+             build/idt_handlers.o build/idt_flush.o build/context_switch.o
+
 C_OBJECTS = $(patsubst src/%.c, build/%.o, $(C_SOURCES))
 OBJECTS = $(AS_OBJECTS) $(C_OBJECTS)
 
@@ -55,12 +37,32 @@ $(KERNEL): $(OBJECTS)
 	$(LD) $(LDFLAGS) -o $(KERNEL) $(OBJECTS)
 
 # Rule to compile assembly files
-build/%.o: src/%.asm
+build/multiboot_header.o: src/multiboot_header.asm
+	mkdir -p build
+	$(AS) $(ASFLAGS) $< -o $@
+
+build/bootstrap.o: src/bootstrap.asm
+	mkdir -p build
+	$(AS) $(ASFLAGS) $< -o $@
+
+build/gdt_asm.o: src/gdt_asm.asm
+	mkdir -p build
+	$(AS) $(ASFLAGS) $< -o $@
+
+build/idt_handlers.o: src/idt_handlers.asm
+	mkdir -p build
+	$(AS) $(ASFLAGS) $< -o $@
+
+build/idt_flush.o: src/idt_flush.asm
+	mkdir -p build
+	$(AS) $(ASFLAGS) $< -o $@
+
+build/context_switch.o: src/context_switch.asm
 	mkdir -p build
 	$(AS) $(ASFLAGS) $< -o $@
 
 # Rule to compile C files
-build/%.o: src/%.c
+$(C_OBJECTS): build/%.o: src/%.c
 	mkdir -p build
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -81,8 +83,8 @@ iso: $(KERNEL)
 run: iso
 	qemu-system-i386 -cdrom $(ISO) -serial stdio
 
-# Rule to run with debugging
+# Debug target with GDB
 debug: iso
-	qemu-system-i386 -cdrom $(ISO) -serial stdio -s -S
+	qemu-system-i386 -cdrom $(ISO) -s -S -serial stdio
 
 .PHONY: all clean run iso debug

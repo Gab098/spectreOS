@@ -41,15 +41,18 @@ typedef struct {
     page_directory_entry_t tables[1024];
 } page_directory_t;
 
-// Global page directories
-extern page_directory_t *kernel_directory;
-extern page_directory_t *current_directory;
-
 // VMM functions
 void vmm_init();
 void vmm_map_page(uint32_t virt, uint32_t phys);
 void vmm_switch_page_directory(page_directory_t *dir);
 page_table_entry_t* vmm_get_page(uint32_t address, int make, page_directory_t *dir);
-page_directory_t* clone_page_directory(page_directory_t *src);
+
+// Page directory management
+page_directory_t* clone_page_directory(page_directory_t* src);
+void free_page_directory(page_directory_t* dir);
+
+// Global page directories
+extern page_directory_t *kernel_directory;
+extern page_directory_t *current_directory;
 
 #endif // MM_H
