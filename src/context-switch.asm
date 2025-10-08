@@ -1,34 +1,47 @@
-; Context switch implementation
-; This function performs the actual task switch
+; context_switch.asm
+; Low-level context switching for task management
 
 global switch_to_task
 extern current_task
 
-; void switch_to_task(registers_t* old_regs, registers_t* new_regs)
+; void switch_to_task(task_t* next_task)
+; This function performs a complete context switch to the next task
 switch_to_task:
-    push ebp
-    mov ebp, esp
+    cli                         ; Disable interrupts during switch
     
-    ; Save current task state (if old_regs is not NULL)
-    mov eax, [ebp + 8]  ; old_regs pointer
-    test eax, eax
-    jz .load_new_state
+    mov eax, [esp + 4]          ; Get next_task pointer from argument
     
-    ; Save current registers to old_regs
-    mov [eax + 0], edi
-    mov [eax + 4], esi
-    mov [eax + 8], ebp
-    mov [eax + 12], esp
-    mov [eax + 16], ebx
-    mov [eax + 20], edx
-    mov [eax + 24], ecx
-    mov [eax + 28], ecx  ; eax will be saved later
+    ; Save current task context (if we have a current task)
+    mov ebx, [current_task]
+    test ebx, ebx
+    jz .load_context            ; If no current task, just load new one
     
-.load_new_state:
-    ; Load new task state
-    mov eax, [ebp + 12]  ; new_regs pointer
+    ; Save current registers into current_task structure
+    ; Offset 0: edi, 4: esi, 8: ebp, 12: esp, 16: ebx, 20: edx, 24: ecx, 28: eax
+    mov [ebx + 0], edi
+    mov [ebx + 4], esi
+    mov [ebx + 8], ebp
+    mov [ebx + 12], esp
+    mov [ebx + 16], ebx
+    mov [ebx + 20], edx
+    mov [ebx + 24], ecx
+    mov [ebx + 28], eax
     
-    ; Restore registers from new_regs
+    ; Save segment registers (offset 32+)
+    mov cx, ds
+    mov [ebx + 32], cx
+    mov cx, es
+    mov [ebx + 34], cx
+    mov cx, fs
+    mov [ebx + 36], cx
+    mov cx, gs
+    mov [ebx + 38], cx
+    
+.load_context:
+    ; Update current_task pointer
+    mov [current_task], eax
+    
+    ; Restore registers from new task structure
     mov edi, [eax + 0]
     mov esi, [eax + 4]
     mov ebp, [eax + 8]
@@ -36,15 +49,25 @@ switch_to_task:
     mov ebx, [eax + 16]
     mov edx, [eax + 20]
     mov ecx, [eax + 24]
-    ; eax is restored last
+    ; Don't restore eax yet, we need it
     
     ; Restore segment registers
-    mov ax, [eax + 32 + 2]  ; ds
-    mov ds, ax
-    mov es, ax
-    mov fs, ax
-    mov gs, ax
+    mov cx, [eax + 32]
+    mov ds, cx
+    mov es, cx
+    mov fs, cx
+    mov gs, cx
     
-    ; The actual context switch will happen via iret in the interrupt handler
-    pop ebp
+    ; Finally restore eax
+    mov eax, [eax + 28]
+    
+    sti                         ; Re-enable interrupts
+    ret
+
+; Alternative: Simplified switch that just changes ESP
+; Useful for cooperative multitasking
+global switch_stack
+switch_stack:
+    mov eax, [esp + 4]          ; Get new stack pointer
+    mov esp, eax                ; Switch stack
     ret

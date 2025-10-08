@@ -203,10 +203,14 @@ void vmm_map_page(uint32_t virt, uint32_t phys) {
     }
 }
 
-// Clone a page table
+// Clone a page table (helper function)
 static page_table_t* clone_page_table(page_table_t *src, uint32_t *phys_addr) {
     // Allocate new page table
     uint32_t table_phys = pmm_alloc_frame();
+    if (!table_phys) {
+        return NULL;
+    }
+    
     page_table_t *table = (page_table_t*)table_phys;
     
     if (phys_addr) {
@@ -220,8 +224,12 @@ static page_table_t* clone_page_table(page_table_t *src, uint32_t *phys_addr) {
             continue;
         }
         
-        // Allocate new frame for copy-on-write
+        // Allocate new frame for copy
         uint32_t new_frame = pmm_alloc_frame();
+        if (!new_frame) {
+            // TODO: Free already allocated pages
+            return NULL;
+        }
         
         // Copy page data
         memcpy((void*)new_frame, 
@@ -244,6 +252,10 @@ static page_table_t* clone_page_table(page_table_t *src, uint32_t *phys_addr) {
 page_directory_t* clone_page_directory(page_directory_t *src) {
     // Allocate new page directory
     uint32_t dir_phys = pmm_alloc_frame();
+    if (!dir_phys) {
+        return NULL;
+    }
+    
     page_directory_t *dir = (page_directory_t*)dir_phys;
     
     // Zero it out
@@ -260,7 +272,12 @@ page_directory_t* clone_page_directory(page_directory_t *src) {
         
         // Clone it
         uint32_t new_table_phys;
-        clone_page_table(src_table, &new_table_phys);
+        page_table_t* new_table = clone_page_table(src_table, &new_table_phys);
+        
+        if (!new_table) {
+            // TODO: Free already allocated tables
+            return NULL;
+        }
         
         // Set up directory entry
         dir->tables[i].present = 1;
@@ -269,104 +286,30 @@ page_directory_t* clone_page_directory(page_directory_t *src) {
         dir->tables[i].frame = new_table_phys >> 12;
     }
     
-// Funzione helper per copiare una page table
-static page_table_t* clone_page_table(page_table_t* src, uint32_t* phys_addr) {
-    // Alloca una nuova page table
-    uint32_t phys = pmm_alloc_frame();
-    if (!phys) return NULL;
-    
-    page_table_t* table = (page_table_t*)phys;
-    *phys_addr = phys;
-    
-    // Copia tutte le entry
-    for (int i = 0; i < 1024; i++) {
-        if (src->pages[i].present) {
-            // Alloca un nuovo frame per questa pagina
-            uint32_t new_frame = pmm_alloc_frame();
-            if (!new_frame) {
-                // Gestione errore: dovremmo liberare le pagine già allocate
-                return NULL;
-            }
-            
-            // Copia i dati dalla pagina sorgente
-            memcpy((void*)new_frame, 
-                   (void*)(src->pages[i].frame * PAGE_SIZE), 
-                   PAGE_SIZE);
-            
-            // Configura la nuova entry
-            table->pages[i].present = src->pages[i].present;
-            table->pages[i].rw = src->pages[i].rw;
-            table->pages[i].user = src->pages[i].user;
-            table->pages[i].accessed = 0;
-            table->pages[i].dirty = 0;
-            table->pages[i].frame = new_frame >> 12;
-        } else {
-            table->pages[i].present = 0;
-        }
-    }
-    
-    return table;
-}
-
-// Clona una page directory (per creare un nuovo processo)
-page_directory_t* clone_page_directory(page_directory_t* src) {
-    // Alloca la nuova page directory
-    uint32_t phys = pmm_alloc_frame();
-    if (!phys) return NULL;
-    
-    page_directory_t* dir = (page_directory_t*)phys;
-    
-    // Inizializza tutte le entry a 0
-    for (int i = 0; i < 1024; i++) {
-        dir->tables[i].present = 0;
-    }
-    
-    // Copia le page table
-    for (int i = 0; i < 1024; i++) {
-        if (src->tables[i].present) {
-            page_table_t* src_table = (page_table_t*)(src->tables[i].frame * PAGE_SIZE);
-            uint32_t table_phys;
-            
-            page_table_t* new_table = clone_page_table(src_table, &table_phys);
-            if (!new_table) {
-                // Gestione errore: dovremmo liberare tutto
-                return NULL;
-            }
-            
-            dir->tables[i].present = 1;
-            dir->tables[i].rw = src->tables[i].rw;
-            dir->tables[i].user = src->tables[i].user;
-            dir->tables[i].frame = table_phys >> 12;
-        }
-    }
-    
     return dir;
 }
 
-// Funzione per liberare una page directory
+// Free a page directory
 void free_page_directory(page_directory_t* dir) {
     if (!dir) return;
     
-    // Libera tutte le page table e i loro frame
+    // Free all page tables and their frames
     for (int i = 0; i < 1024; i++) {
         if (dir->tables[i].present) {
             page_table_t* table = (page_table_t*)(dir->tables[i].frame * PAGE_SIZE);
             
-            // Libera tutti i frame nella page table
+            // Free all frames in the page table
             for (int j = 0; j < 1024; j++) {
                 if (table->pages[j].present) {
                     pmm_free_frame(table->pages[j].frame * PAGE_SIZE);
                 }
             }
             
-            // Libera la page table stessa
+            // Free the page table itself
             pmm_free_frame(dir->tables[i].frame * PAGE_SIZE);
         }
     }
     
-    // Libera la page directory
+    // Free the page directory
     pmm_free_frame((uint32_t)dir);
-}
-
-    return dir;
 }

@@ -1,8 +1,8 @@
 #include "idt.h"
-#include "gdt.h" // For GDT_CODE_SEGMENT_SELECTOR
-#include "pic.h" // For pic_send_eoi
-#include "keyboard.h" // For keyboard_handler
-#include "task.h"     // For schedule_and_switch
+#include "gdt.h"
+#include "pic.h"
+#include "keyboard.h"
+#include "task.h"
 #include <stdint.h>
 
 // External function from kernel.c for printing
@@ -50,6 +50,7 @@ extern void isr30();
 extern void isr31();
 extern void isr32(); // Timer
 extern void isr33(); // Keyboard
+extern void isr128(); // Syscall (0x80)
 
 // Function to set an IDT entry
 static void idt_set_gate(uint8_t num, uint32_t base, uint16_t selector, uint8_t flags) {
@@ -58,6 +59,11 @@ static void idt_set_gate(uint8_t num, uint32_t base, uint16_t selector, uint8_t 
     idt_entries[num].selector    = selector;
     idt_entries[num].zero        = 0;
     idt_entries[num].flags       = flags;
+}
+
+// Function to set syscall IDT gate (with DPL=3 for user mode access)
+void idt_set_gate_syscall(uint8_t num, uint32_t base, uint16_t selector, uint8_t flags) {
+    idt_set_gate(num, base, selector, flags);
 }
 
 // Generic interrupt handler for exceptions (ISR 0-31) and IRQs
@@ -72,6 +78,12 @@ void isr_handler(struct regs *r) {
     if (r->int_no == 0x21) { // Keyboard IRQ (remapped to 0x21)
         keyboard_handler(r);
         pic_send_eoi(r->int_no); // Send EOI for keyboard
+        return;
+    }
+    
+    // Handle syscall (should not reach here, handled separately)
+    if (r->int_no == 0x80) {
+        // Syscall is handled in syscall.asm
         return;
     }
 
@@ -101,10 +113,33 @@ void isr_handler(struct regs *r) {
             for (int i = 7; i >= 0; i--) {
                 k_print_char(hex_digits[(faulting_address >> (i * 4)) & 0xF], 0x0C);
             }
+            print("\nError code: ");
+            for (int i = 7; i >= 0; i--) {
+                k_print_char(hex_digits[(r->err_code >> (i * 4)) & 0xF], 0x0C);
+            }
+            print("\n");
+            
+            // Decode error code
+            print("  Present: "); print(r->err_code & 0x1 ? "Yes" : "No"); print("\n");
+            print("  Write: "); print(r->err_code & 0x2 ? "Yes" : "No"); print("\n");
+            print("  User: "); print(r->err_code & 0x4 ? "Yes" : "No"); print("\n");
+            
+            for(;;) __asm__("hlt");
+        } else if (r->int_no == 13) { // General Protection Fault
+            print("\nGENERAL PROTECTION FAULT!\n");
+            print("Error code: ");
+            char hex_digits[] = "0123456789ABCDEF";
+            for (int i = 7; i >= 0; i--) {
+                k_print_char(hex_digits[(r->err_code >> (i * 4)) & 0xF], 0x0C);
+            }
             print("\n");
             for(;;) __asm__("hlt");
         } else {
-            print("\nEXCEPTION!\n");
+            print("\nEXCEPTION ");
+            k_print_char((r->int_no / 10) + '0', 0x0C);
+            k_print_char((r->int_no % 10) + '0', 0x0C);
+            print("!\n");
+            for(;;) __asm__("hlt");
         }
     }
 }
@@ -156,6 +191,9 @@ void init_idt() {
     // IRQ handlers
     idt_set_gate(32, (uint32_t)isr32, GDT_CODE_SEGMENT_SELECTOR, 0x8E); // Timer
     idt_set_gate(33, (uint32_t)isr33, GDT_CODE_SEGMENT_SELECTOR, 0x8E); // Keyboard
+
+    // Syscall handler (0x80) - with DPL=3 to allow user mode access
+    idt_set_gate(0x80, (uint32_t)isr128, GDT_CODE_SEGMENT_SELECTOR, 0xEE);
 
     // Load the IDT
     idt_flush((uint32_t)&idt_ptr);

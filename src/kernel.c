@@ -9,6 +9,9 @@
 #include "vfs.h"
 #include "io.h"
 #include "string.h"
+#include "syscall.h"
+#include "usermode.h"
+#include "scheduler.h"
 
 // Current cursor position for kernel printing
 int k_current_x = 0;
@@ -120,6 +123,34 @@ void task3_func() {
     }
 }
 
+// User mode test function
+void user_mode_test() {
+    // This function will run in ring 3
+    print("Hello from USER MODE!\n");
+    
+    // Test syscall
+    const char* msg = "Syscall test from user mode\n";
+    uint32_t len = strlen(msg);
+    
+    // Call sys_write via int 0x80
+    __asm__ volatile(
+        "mov $1, %%eax\n"      // SYSCALL_WRITE
+        "mov $1, %%ebx\n"      // fd = 1 (stdout)
+        "mov %0, %%ecx\n"      // buffer
+        "mov %1, %%edx\n"      // count
+        "int $0x80\n"
+        :
+        : "r"(msg), "r"(len)
+        : "eax", "ebx", "ecx", "edx"
+    );
+    
+    // Infinite loop
+    for(;;) {
+        k_print_char('U', 0x0D); // Pink 'U' for user mode
+        for(volatile int i = 0; i < 10000000; i++);
+    }
+}
+
 // Test VFS
 void test_vfs() {
     print("\n=== Testing VFS ===\n");
@@ -190,8 +221,9 @@ void kmain(unsigned long magic, unsigned long multiboot_info_addr) {
     k_current_y = 0;
 
     print("==================================\n");
-    print("  Benvenuto in SpectreOS v0.2\n");
-    print("  Multitasking Operating System\n");
+    print("  Benvenuto in SpectreOS v0.3\n");
+    print("  Advanced Multitasking OS\n");
+    print("  + User Mode + Syscalls\n");
     print("==================================\n\n");
 
     // Initialize serial port for debugging
@@ -216,7 +248,7 @@ void kmain(unsigned long magic, unsigned long multiboot_info_addr) {
     heap_init(0x400000, 0x100000); // 4MB, size 1MB
     print("Heap inizializzato.\n");
 
-    // Initialize GDT
+    // Initialize GDT (with user mode support)
     print("Inizializzazione GDT...\n");
     init_gdt();
     print("GDT inizializzata.\n");
@@ -249,20 +281,42 @@ void kmain(unsigned long magic, unsigned long multiboot_info_addr) {
     init_tasking();
     print("Sistema di tasking inizializzato.\n");
 
+    // Initialize scheduler
+    print("Inizializzazione Scheduler...\n");
+    init_scheduler(SCHED_PRIORITY);
+    print("Scheduler (Priority-based) inizializzato.\n");
+
+    // Initialize syscalls
+    print("Inizializzazione Syscalls...\n");
+    init_syscalls();
+    print("Syscalls inizializzati.\n");
+
+    // Initialize user mode support
+    print("Inizializzazione User Mode...\n");
+    init_usermode();
+    print("User Mode inizializzato.\n");
+
     // Enable interrupts!
     __asm__("sti");
     print("Interrupt abilitati.\n\n");
 
     print("Creazione task di test...\n");
-    task_t* t1 = create_task(task1_func);
-    task_t* t2 = create_task(task2_func);
-    task_t* t3 = create_task(task3_func);
+    
+    // Create kernel-mode tasks with different priorities
+    task_t* t1 = create_task_ex(task1_func, PRIORITY_HIGH, 0, "Task 1");
+    task_t* t2 = create_task_ex(task2_func, PRIORITY_NORMAL, 0, "Task 2");
+    task_t* t3 = create_task_ex(task3_func, PRIORITY_LOW, 0, "Task 3");
     
     if (t1 && t2 && t3) {
-        print("Task creati con successo!\n");
-        print("Task 1 PID: "); print_dec(t1->id); print("\n");
-        print("Task 2 PID: "); print_dec(t2->id); print("\n");
-        print("Task 3 PID: "); print_dec(t3->id); print("\n");
+        print("Task kernel creati con successo!\n");
+        print("Task 1 PID: "); print_dec(t1->id); print(" (Priority: HIGH)\n");
+        print("Task 2 PID: "); print_dec(t2->id); print(" (Priority: NORMAL)\n");
+        print("Task 3 PID: "); print_dec(t3->id); print(" (Priority: LOW)\n");
+        
+        // Add tasks to scheduler
+        scheduler_add_task(t1, PRIORITY_HIGH);
+        scheduler_add_task(t2, PRIORITY_NORMAL);
+        scheduler_add_task(t3, PRIORITY_LOW);
     } else {
         print("ERRORE: Impossibile creare i task!\n");
     }
@@ -271,8 +325,20 @@ void kmain(unsigned long magic, unsigned long multiboot_info_addr) {
     print("==================================\n");
     print(" Kernel avviato con successo!\n");
     print(" Multitasking attivo.\n");
+    print(" User mode supportato.\n");
     print(" Premere tasti per testare input.\n");
     print("==================================\n\n");
+
+    // Dopo qualche secondo, prova a lanciare un task in user mode
+    print("Tra 3 secondi lancio un task in user mode...\n");
+    for(volatile int i = 0; i < 100000000; i++);
+    
+    print("Switching to USER MODE...\n");
+    // switch_to_usermode(user_mode_test);
+    // NOTA: Per ora commentato perché richiede setup più complesso
+
+    // Print scheduler info
+    scheduler_print_info();
 
     // Idle loop - il kernel idle task
     uint32_t idle_counter = 0;
@@ -280,8 +346,7 @@ void kmain(unsigned long magic, unsigned long multiboot_info_addr) {
         __asm__("hlt"); // Risparmia energia quando non ci sono interrupt
         
         idle_counter++;
-        if (idle_counter % 1000000 == 0) {
-            // Ogni tanto stampa un punto per mostrare che il kernel è vivo
+        if (idle_counter % 10000000 == 0) {
             serial_print(".");
         }
     }

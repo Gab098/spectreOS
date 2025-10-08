@@ -21,6 +21,16 @@ struct gdt_ptr_struct {
 } __attribute__((packed));
 typedef struct gdt_ptr_struct gdt_ptr_t;
 
+// GDT entries - now 6 entries to support user mode and TSS
+// 0: Null
+// 1: Kernel Code (0x08)
+// 2: Kernel Data (0x10)
+// 3: User Code   (0x18)
+// 4: User Data   (0x20)
+// 5: TSS         (0x28)
+extern gdt_entry_t gdt_entries[6];
+extern gdt_ptr_t gdt_ptr;
+
 // Function to initialize the GDT
 void init_gdt();
 
