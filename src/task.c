@@ -4,7 +4,7 @@
 #include "scheduler.h"
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
+#include "string.h"
 
 // Puntatore al task attualmente in esecuzione
 volatile task_t *current_task = NULL;

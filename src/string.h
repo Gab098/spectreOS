@@ -1,7 +1,7 @@
 #ifndef STRING_H
 #define STRING_H
 
-#include <stddef.h>
+#include "types.h"
 
 // Memory functions
 void* memcpy(void* dest, const void* src, size_t n);

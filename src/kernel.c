@@ -1,4 +1,4 @@
-#include <stdint.h>
+#include "types.h"
 #include "gdt.h"
 #include "idt.h"
 #include "pic.h"
@@ -209,6 +209,7 @@ void test_vfs() {
 
 // The main entry point for the C part of the kernel
 void kmain(unsigned long magic, unsigned long multiboot_info_addr) {
+    (void)magic; // Suppress unused parameter warning
     // Mask all PIC interrupts during setup
     outb(PIC1_DATA, 0xFF);
     outb(PIC2_DATA, 0xFF);

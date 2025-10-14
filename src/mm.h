@@ -1,7 +1,7 @@
 #ifndef MM_H
 #define MM_H
 
-#include <stdint.h>
+#include "types.h"
 #include "multiboot2.h"
 
 #define PAGE_SIZE 4096

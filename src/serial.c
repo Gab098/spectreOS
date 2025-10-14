@@ -1,7 +1,7 @@
 #include "io.h"
 #include "serial.h" // Include for DEBUG macros
 #include <stdarg.h> // For va_list, va_start, va_end
-#include <string.h> // For strlen
+#include "string.h" // For strlen
 #include <stdint.h> // For uint32_t
 
 #define SERIAL_PORT 0x3F8 // COM1

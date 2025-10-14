@@ -14,7 +14,7 @@ LDFLAGS = -T src/linker.ld -m elf_i386
 # Define source files
 AS_SOURCES = src/multiboot_header.asm src/bootstrap.asm src/gdt_asm.asm \
              src/idt_handlers.asm src/idt_flush.asm src/context_switch.asm \
-             src/syscall.asm src/usermode.asm
+             src/syscall.asm
 
 C_SOURCES = src/kernel.c src/gdt.c src/idt.c src/pic.c src/keyboard.c \
             src/mm.c src/task.c src/heap.c src/process.c src/serial.c \
@@ -23,7 +23,7 @@ C_SOURCES = src/kernel.c src/gdt.c src/idt.c src/pic.c src/keyboard.c \
 # Define object files
 AS_OBJECTS = build/multiboot_header.o build/bootstrap.o build/gdt_asm.o \
              build/idt_handlers.o build/idt_flush.o build/context_switch.o \
-             build/syscall.o build/usermode.o
+             build/syscall_isr.o
 
 C_OBJECTS = $(patsubst src/%.c, build/%.o, $(C_SOURCES))
 OBJECTS = $(AS_OBJECTS) $(C_OBJECTS)
@@ -63,13 +63,10 @@ build/context_switch.o: src/context_switch.asm
 	mkdir -p build
 	$(AS) $(ASFLAGS) $< -o $@
 
-build/syscall.o: src/syscall.asm
+build/syscall_isr.o: src/syscall.asm
 	mkdir -p build
 	$(AS) $(ASFLAGS) $< -o $@
 
-build/usermode.o: src/usermode.asm
-	mkdir -p build
-	$(AS) $(ASFLAGS) $< -o $@
 
 # Rule to compile C files
 $(C_OBJECTS): build/%.o: src/%.c
